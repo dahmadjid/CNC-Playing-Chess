@@ -1,51 +1,7 @@
 import cv2
-import numpy
+import numpy as np
 import chess
-def DrawCirclesOnCorners(img,y1,x1,y2,x2,y3,x3,y4,x4,f):
-
-    Corners=[(y1,x1),(y2,x2),(y3,x3),(y4,x4)]
-    for y,x in Corners:
-        cv2.circle(img , (x,y) , 1 ,(255,0,0) ,-1)
-    cv2.imwrite('ChessDataset/new/withcircles/'+f,img)
-
-
-def findCorners(img):
-
-    img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    ret , thresh = cv2.threshold(img ,3 , 255,cv2.THRESH_BINARY)
-    corners=cv2.goodFeaturesToTrack(thresh , 4 , 0.01 , 10)
-    Corners=[]
-    sum = 0
-    try:
-
-        for c in corners:
-            x,y = c.ravel()
-            Corners.append((y,x))
-            sum = y + x + sum
-        avg=sum/8 #sort the corners
-        output = [(1,1),(2,2),(3,3),(4,4)]
-        check_output = [(1,1),(2,2),(3,3),(4,4)]
-        for y,x in Corners:
-
-            if x < avg and y < avg :
-                output[0]=(y,x)
-            elif x>avg and y<avg:
-                output[1]=(y,x)
-            elif x<avg and y>avg:
-                output[2]=(y,x)
-            elif x>avg and y>avg:
-                output[3]=(y,x)
-
-    except:
-        output = None
-    if corners is not None:
-        if output[0] == check_output[0] or output[1] == check_output[1] or output[2] == check_output[2] or output[3] == check_output[3]:
-            output = None
-
-    return output
-
-
-
+import requests
 def ResizeWithAspectRatio(image, width=None, height=None, inter=cv2.INTER_AREA):
     dim = None
     (h, w) = image.shape[:2]
@@ -64,36 +20,129 @@ def ResizeWithAspectRatio(image, width=None, height=None, inter=cv2.INTER_AREA):
 
     return cv2.resize(image, dim, interpolation=inter)
 
+def takeImage(url):
+
+    #url = r'http://172.20.13.144:8080/photo.jpg'
+    #url = r'http://192.168.43.1:8080/photoaf.jpg'
+    resp = requests.get(url, stream=True).raw
+    image = np.asarray(bytearray(resp.read()), dtype="uint8")
+    image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+    return image
+    # # for testing
+    # cv2.imshow('image',image)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+     
+def findChessBoardCorners(img,accuracy,debugging = False):  #the smaller the accuracy the better
+    
+    imgoriginal = img
+    img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY) 
+
+    ret, thresh = cv2.threshold(img,60,255,cv2.THRESH_BINARY)
+    black_list = []
+    y = 0
+    for row in thresh:
+        x = 0
+        for col in row:
+            if int(col) == 0:
+                black_list.append([y,x])
+            x += 1
+        y +=1         
+        
+    for i in range(len(black_list)-1):
+            if i%accuracy != 0:
+                continue
+            y1,x1 = black_list[i]
+            for j in range(len(black_list)-1):
+                y2,x2 = black_list[j]
+                cv2.line(thresh,(x1,y1),(x2,y2),(0,255,0),1)
+
+    corners = cv2.goodFeaturesToTrack(thresh, 4, 0.001, 10)
+    corners_list = []
+    for c in corners:
+        x, y = c.ravel()
+        cv2.circle(img , (x,y) , 20 ,(255,0,0) ,-1)
+        corners_list.append([y,x])
+    if debugging:
+        cv2.imshow("d",thresh)
+        cv2.imshow("qwdqwdwq",img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()    
+    sorted_list = [0,0,0,0]
+    print(img.shape)
+    #sorting
+    average_y = (corners_list[0][0] + corners_list[1][0] + corners_list[2][0] + corners_list[3][0])/4
+    average_x = (corners_list[0][1] + corners_list[1][1] + corners_list[2][1] + corners_list[3][1])/4
+    print(average_y,average_x)
+    for corner in corners_list:
+        y,x = corner
+        print(corner)
+        if y < average_y and x < average_x:
+            sorted_list[0] = [int(y),int(x)]
+        elif y < average_y and x > average_x:
+            sorted_list[1] = [int(y),int(x)]
+        elif y > average_y and x > average_x:
+            sorted_list[2] = [int(y),int(x)]
+        elif y > average_y and x < average_x:
+            sorted_list[3] = [int(y),int(x)]
+    return sorted_list
+def cropWarp(img,corners_list):  # corners_list : list of 4 points (height,width) or (y,x)
+                                # img should be same size as the img used to find corners_list from function findChessBoardCorners
+                                # yes the function later flips the coordinates but the input is (y,x)
+    top_left, top_right, bottom_right, bottom_left = corners_list
+    top_left = [top_left[1],top_left[0]]
+    top_right = [top_right[1],top_right[0]]
+    bottom_right = [bottom_right[1],bottom_right[0]]
+    bottom_left = [bottom_left[1],bottom_left[0]]
+
+    src = np.array([top_left, top_right, bottom_right, bottom_left], dtype='float32')
+    width_AD = np.sqrt(((top_left[0] - top_right[0]) ** 2) + ((top_left[1] - top_right[1]) ** 2))
+    width_BC = np.sqrt(((bottom_left[0] - bottom_right[0]) ** 2) + ((bottom_left[1] - bottom_right[1]) ** 2))
+    max_width = max(int(width_AD), int(width_BC))
+    height_AB = np.sqrt(((top_left[0] - bottom_left[0]) ** 2) + ((top_left[1] - bottom_left[1]) ** 2))
+    height_CD = np.sqrt(((bottom_right[0] - top_right[0]) ** 2) + ((bottom_right[1] - top_right[1]) ** 2))
+    max_height = max(int(height_AB), int(height_CD))
+    dst = np.float32([[0, 0],[max_width, 0],[max_width , max_height],[0, max_height]])
+    m = cv2.getPerspectiveTransform(src, dst)
+    return cv2.warpPerspective(img, m,(max_width,max_height)) 
 def addPadding(img,size):
     newimg=cv2.copyMakeBorder(img, size, size, size, size, cv2.BORDER_CONSTANT, value=200)
     return newimg
-def crop(img,size):
+def crop(img,height_size,width_size):
     h,w,c = img.shape
-    img = img[size:h-size,size:w-size]
+    img = img[height_size:h-height_size,width_size:w-width_size]
     return img
 def vFlip(img):
     img = cv2.flip(img, 0)
     return img
-def findSquaresCorners(blank_board):
-    blank = ResizeWithAspectRatio(blank_board, width=480)
-    if blank.shape[2] > 1:
-        blank = cv2.cvtColor(blank, cv2.COLOR_BGR2GRAY)
-    padded = addPadding(blank, 20)
-    
+def findSquaresCorners(blank):
+
+    blank = cv2.cvtColor(blank, cv2.COLOR_BGR2GRAY)
+
+    ret, thresh = cv2.threshold(blank, 175, 255, cv2.THRESH_BINARY)
+    thresh = vFlip(thresh)
+    # thresh = cv2.GaussianBlur(thresh,(15,15),0)
+    thresh = cv2.bilateralFilter(thresh,9,75,75)
+    ret, thresh = cv2.threshold(thresh, 150, 255, cv2.THRESH_BINARY)
+    padded = addPadding(thresh, 50)
     cv2.imshow('ss',padded)
     cv2.waitKey()
     cv2.destroyAllWindows()
-    #ret, thresh = cv2.threshold(padded, 175, 255, cv2.THRESH_BINARY)
-    thresh = vFlip(padded)
-    corners = cv2.goodFeaturesToTrack(thresh, 81, 0.001, 10)
+    corners = cv2.goodFeaturesToTrack(padded, 81, 0.01, 50)
     corners_list = []
     for c in corners:
         x, y = c.ravel()
-        corners_list.append([int(y - 20), int(x - 20)])
+        corners_list.append([int(y - 50), int(x - 50)])
+        cv2.circle(blank , (int(x - 50),int(y - 50)) , 2 ,(255,0,0) ,-1)
+    cv2.imshow("ss",blank)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+        
     print(len(corners_list))
     return corners_list
 
-def sortPts(corners_list:list) ->list:
+def sortPts(corners_list:list) ->list:   #list of the 81pts of the chess board of each cell 
+                                         #list should be sorted so that later they are sorted according to chess.SQUARE_NAMES
     sorted_pts = [0 for k in range(81)]
     for i in range(81):
         min = 600
@@ -129,7 +178,7 @@ def makeSquares(img,sorted_pts:list):
     for i in range(71):
         if i in [8,17,26,35,44,53,62]:
             continue
-
+        cv2.line
         square = img[sorted_pts[i][0]:sorted_pts[i+10][0],sorted_pts[i][1]:sorted_pts[i+10][1]]
         squares.append(square)
  
@@ -157,7 +206,7 @@ def makeSquaresDicts(squares:list):
             i += 1
     return squares_dict,squares_color_dict
     
-    
+
     
     
 def makeSquaresStateDict(squares_dict,squares_color_dict,board):
@@ -199,6 +248,7 @@ def makeSquaresStateDict(squares_dict,squares_color_dict,board):
     return squares_state_dict
     
 def wholeProcess(blank_board,board):
+    
     corners_list = findSquaresCorners(blank_board)
     sorted_pts = sortPts(corners_list)
     squares_list = makeSquares(board,sorted_pts)
@@ -250,7 +300,7 @@ def compareOldNew(sd1,scd1,b1,sd2,scd2,b2):  #Test this
                 print('wtf happend')    
 
     
-    elif sum1-sum2 > 0:
+    elif sum1-sum2 > 0: 
         #eating happend
         for square in chess.SQUARE_NAMES:
             diff = ssd2[square] - ssd1[square]
@@ -279,9 +329,60 @@ def compareOldNew(sd1,scd1,b1,sd2,scd2,b2):  #Test this
                 to_cord = square
                 
     return from_cord + to_cord        
-            
-    
-    
+def takeImage(address):
+    cap = cv2.VideoCapture(address)
+    while True:
+        ret,frame = cap.read()
         
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        
+
+
+#def DrawCirclesOnCorners(img,y1,x1,y2,x2,y3,x3,y4,x4,f):
+
+#     Corners=[(y1,x1),(y2,x2),(y3,x3),(y4,x4)]
+#     for y,x in Corners:
+#         cv2.circle(img , (x,y) , 1 ,(255,0,0) ,-1)
+#     cv2.imwrite('ChessDataset/new/withcircles/'+f,img)
+
+
+# def findCorners(img):
+
+#     img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+#     ret , thresh = cv2.threshold(img ,3 , 255,cv2.THRESH_BINARY)
+#     corners=cv2.goodFeaturesToTrack(thresh , 4 , 0.01 , 10)
+#     Corners=[]
+#     sum = 0
+#     try:
+
+#         for c in corners:
+#             x,y = c.ravel()
+#             Corners.append((y,x))
+#             sum = y + x + sum
+#         avg=sum/8 #sort the corners
+#         output = [(1,1),(2,2),(3,3),(4,4)]
+#         check_output = [(1,1),(2,2),(3,3),(4,4)]
+#         for y,x in Corners:
+
+#             if x < avg and y < avg :
+#                 output[0]=(y,x)
+#             elif x>avg and y<avg:
+#                 output[1]=(y,x)
+#             elif x<avg and y>avg:
+#                 output[2]=(y,x)
+#             elif x>avg and y>avg:
+#                 output[3]=(y,x)
+
+#     except:
+#         output = None
+#     if corners is not None:
+#         if output[0] == check_output[0] or output[1] == check_output[1] or output[2] == check_output[2] or output[3] == check_output[3]:
+#             output = None
+
+#     return output
+
+
+
     
     
