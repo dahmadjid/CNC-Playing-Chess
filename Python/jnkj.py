@@ -10,8 +10,5 @@ warped_board = crop(warped_board,5,5)
 corners_list = findSquaresCorners(warped_board)
 corners_list = sortPts(corners_list)
 squares_dict,squares_color_dict = makeSquaresDicts(makeSquares(warped_board,corners_list))
-for square_name,square in squares_dict.items():
-    cv2.imshow(square_name,square)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
+squares_state_dict = makeSquaresStateDict(squares_dict,squares_color_dict,warped_board)
+print(squares_state_dict)

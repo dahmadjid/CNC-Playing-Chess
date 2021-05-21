@@ -216,11 +216,12 @@ def makeSquaresStateDict(squares_dict,squares_color_dict,board):
         # piece = getPiece(board,square_name)
         # piece_color = piece[0]
         # square_color = squares_color_dict[square_name]
-        square = crop(square, 5)
+        square = crop(square, 7,7)
         grey_square = cv2.cvtColor(square, cv2.COLOR_BGR2GRAY)
         ret,thresh = cv2.threshold(grey_square, 125, 255, cv2.THRESH_BINARY)
-
-
+        cv2.imshow(square_name,thresh)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
         # #TODO: use for a real chess picture cuz 125/255 threshhold works for 2d flat pic so far
         # if not piece_color == ' ':
         #     if piece_color == square_color:
@@ -238,7 +239,7 @@ def makeSquaresStateDict(squares_dict,squares_color_dict,board):
         #     pass
 
 
-        corners = cv2.goodFeaturesToTrack(thresh,8, 0.001, 10)
+        corners = cv2.goodFeaturesToTrack(thresh,8, 0.001, 1)
         if corners is None:
             square_state = 0
             squares_state_dict[square_name] = square_state #square is empty ie has no piece in it
