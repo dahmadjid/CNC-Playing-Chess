@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import chess
 import requests
+from PIL import Image
 def ResizeWithAspectRatio(image, width=None, height=None, inter=cv2.INTER_AREA):
     dim = None
     (h, w) = image.shape[:2]
@@ -22,23 +23,27 @@ def ResizeWithAspectRatio(image, width=None, height=None, inter=cv2.INTER_AREA):
 
 def takeImage(url):
 
-    #url = r'http://172.20.13.144:8080/photo.jpg'
-    #url = r'http://192.168.43.1:8080/photoaf.jpg'
+
     resp = requests.get(url, stream=True).raw
+    print("img")
     image = np.asarray(bytearray(resp.read()), dtype="uint8")
     image = cv2.imdecode(image, cv2.IMREAD_COLOR)
     return image
+
     # # for testing
     # cv2.imshow('image',image)
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
-     
-def findChessBoardCorners(img,accuracy,debugging = False):  #the smaller the accuracy the better
+def rotate(img):
+    img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    return img    
+def findChessBoardCorners(img,accuracy,board_corner_threshold,debugging = False):  #the smaller the accuracy the better
     
     imgoriginal = img
     img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY) 
 
-    ret, thresh = cv2.threshold(img,60,255,cv2.THRESH_BINARY)
+    ret, thresh = cv2.threshold(img,board_corner_threshold,255,cv2.THRESH_BINARY)
+
     black_list = []
     y = 0
     for row in thresh:
@@ -57,17 +62,19 @@ def findChessBoardCorners(img,accuracy,debugging = False):  #the smaller the acc
                 y2,x2 = black_list[j]
                 cv2.line(thresh,(x1,y1),(x2,y2),(0,255,0),1)
 
-    corners = cv2.goodFeaturesToTrack(thresh, 4, 0.001, 10)
+    corners = cv2.goodFeaturesToTrack(thresh, 4, 0.001, 100)
     corners_list = []
     for c in corners:
         x, y = c.ravel()
-        cv2.circle(img , (x,y) , 20 ,(255,0,0) ,-1)
+        cv2.circle(img , (int(x),int(y)) , 10 ,(255,0,0) ,-1)
         corners_list.append([y,x])
     if debugging:
         cv2.imshow("d",thresh)
         cv2.imshow("qwdqwdwq",img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()    
+        key = cv2.waitKey(0)
+        cv2.destroyAllWindows()  
+        if key == 27:
+            return None,-1
     sorted_list = [0,0,0,0]
     print(img.shape)
     #sorting
@@ -115,26 +122,30 @@ def crop(img,height_size,width_size):
 def vFlip(img):
     img = cv2.flip(img, 0)
     return img
-def findSquaresCorners(blank):
+def findSquaresCorners(blank,blank_board_threshold):
 
     blank = cv2.cvtColor(blank, cv2.COLOR_BGR2GRAY)
-
-    ret, thresh = cv2.threshold(blank, 175, 255, cv2.THRESH_BINARY)
+     
+    ret, thresh = cv2.threshold(blank, blank_board_threshold, 255, cv2.THRESH_BINARY)
     thresh = vFlip(thresh)
     # thresh = cv2.GaussianBlur(thresh,(15,15),0)
     thresh = cv2.bilateralFilter(thresh,9,75,75)
-    ret, thresh = cv2.threshold(thresh, 150, 255, cv2.THRESH_BINARY)
+    # kernel_v = np.array([[1,1,1],[1,1,1],[0,0,0]],np.float32())
+    # kernel_h = np.array([[0,1,1],[0,1,1],[0,1,1]],np.float32())
+    # thresh = cv2.filter2D(thresh,-1,kernel_h)
+    # thresh = cv2.filter2D(thresh,-1,kernel_v)
+    ref, thresh = cv2.threshold(thresh, 175, 255, cv2.THRESH_BINARY)
     padded = addPadding(thresh, 50)
     cv2.imshow('ss',padded)
     cv2.waitKey()
     cv2.destroyAllWindows()
-    corners = cv2.goodFeaturesToTrack(padded, 81, 0.01, 50)
+    corners = cv2.goodFeaturesToTrack(padded, 81, 0.01, 30)
     corners_list = []
     for c in corners:
         x, y = c.ravel()
         corners_list.append([int(y - 50), int(x - 50)])
-        cv2.circle(blank , (int(x - 50),int(y - 50)) , 2 ,(255,0,0) ,-1)
-    cv2.imshow("ss",blank)
+        cv2.circle(blank , (int(x - 50),int(y - 50)) , 2 ,(0,0,0) ,-1)
+    cv2.imshow("cell_corners",blank)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
         
@@ -174,7 +185,7 @@ def sortPts(corners_list:list) ->list:   #list of the 81pts of the chess board o
     return sorted_pts
 def makeSquares(img,sorted_pts:list):
     squares = []
-    img = vFlip(ResizeWithAspectRatio(img,width=480))
+    
     for i in range(71):
         if i in [8,17,26,35,44,53,62]:
             continue
@@ -184,8 +195,6 @@ def makeSquares(img,sorted_pts:list):
  
     print(len(squares))    
     return squares
-    
-    
     
 def makeSquaresDicts(squares:list):
     squares_dict = {}        #dict to link cell names with the 64 squares of the image
@@ -209,7 +218,7 @@ def makeSquaresDicts(squares:list):
 
     
     
-def makeSquaresStateDict(squares_dict,squares_color_dict,board):
+def makeSquaresStateDict(squares_dict,squares_color_dict,board,cell_threshold):
     squares_state_dict = {}
     for square_name,square in squares_dict.items():
         
@@ -218,10 +227,11 @@ def makeSquaresStateDict(squares_dict,squares_color_dict,board):
         # square_color = squares_color_dict[square_name]
         square = crop(square, 7,7)
         grey_square = cv2.cvtColor(square, cv2.COLOR_BGR2GRAY)
-        ret,thresh = cv2.threshold(grey_square, 125, 255, cv2.THRESH_BINARY)
-        cv2.imshow(square_name,thresh)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        ret,thresh = cv2.threshold(grey_square, cell_threshold, 255, cv2.THRESH_BINARY)
+
+        # cv2.imshow(square_name,thresh)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
         # #TODO: use for a real chess picture cuz 125/255 threshhold works for 2d flat pic so far
         # if not piece_color == ' ':
         #     if piece_color == square_color:
@@ -258,7 +268,7 @@ def wholeProcess(blank_board,board):
     
     return squares_dict,squares_color_dict
 def compare_pil(img1,img2):
-    from PIL import Image
+
     
     i1 = Image.fromarray(img1)
     i2 = Image.fromarray(img2)
@@ -275,18 +285,23 @@ def compare_pil(img1,img2):
     ncomponents = i1.size[0] * i1.size[1] * 3
     return (dif / 255.0 * 100) / ncomponents
 
-def compareOldNew(sd1,scd1,b1,sd2,scd2,b2):  #Test this
+def compareOldNew(b1,b2,corners_list,cell_threshold):  #1 is old board, 2 is new board 
+    from_cord = '00'
+    to_cord = '00'
     sum1 = 0
     sum2 = 0
-    ssd1 = makeSquaresStateDict(sd1,scd1,b1)
-    ssd2 = makeSquaresStateDict(sd2,scd2,b2)
-    print (ssd1,'\n',ssd2)
+    sd1,scd1 = makeSquaresDicts(makeSquares(b1,corners_list))
+    sd2,scd2 = makeSquaresDicts(makeSquares(b2,corners_list))
+    ssd1 = makeSquaresStateDict(sd1,scd1,b1,cell_threshold)
+    ssd2 = makeSquaresStateDict(sd2,scd2,b2,cell_threshold)
     for i in range(64):
         sum1 = sum1 + ssd1[chess.SQUARE_NAMES[i]] 
     for i in range(64):    
-        sum2 = sum2 + ssd2[chess.SQUARE_NAMES[i]] 
+        sum2 = sum2 + ssd2[chess.SQUARE_NAMES[i]]
+    print("sum1,sum2:",sum1,sum2)
     if sum1-sum2 == 0:
         #normal movement happend/castling
+        print("normal movement or castling")
         for square in chess.SQUARE_NAMES:
             
             diff = ssd2[square] - ssd1[square]
@@ -299,9 +314,10 @@ def compareOldNew(sd1,scd1,b1,sd2,scd2,b2):  #Test this
                 pass
             else:
                 print('wtf happend')    
-
+        return from_cord + to_cord
     
     elif sum1-sum2 > 0: 
+        print("eating")
         #eating happend
         for square in chess.SQUARE_NAMES:
             diff = ssd2[square] - ssd1[square]
@@ -328,16 +344,9 @@ def compareOldNew(sd1,scd1,b1,sd2,scd2,b2):  #Test this
             if percentage > percent_max:
                 percent_max = percentage
                 to_cord = square
-                
-    return from_cord + to_cord        
-def takeImage(address):
-    cap = cv2.VideoCapture(address)
-    while True:
-        ret,frame = cap.read()
-        
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-        
+        return from_cord + to_cord
+    return "wtf"        
+
 
 
 #def DrawCirclesOnCorners(img,y1,x1,y2,x2,y3,x3,y4,x4,f):
