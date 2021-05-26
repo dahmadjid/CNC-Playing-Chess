@@ -74,7 +74,7 @@ def findChessBoardCorners(img,accuracy,board_corner_threshold,debugging = False)
         key = cv2.waitKey(0)
         cv2.destroyAllWindows()  
         if key == 27:
-            return None,-1
+            return None,key
     sorted_list = [0,0,0,0]
     print(img.shape)
     #sorting
@@ -92,7 +92,7 @@ def findChessBoardCorners(img,accuracy,board_corner_threshold,debugging = False)
             sorted_list[2] = [int(y),int(x)]
         elif y > average_y and x < average_x:
             sorted_list[3] = [int(y),int(x)]
-    return sorted_list
+    return sorted_list,-1
 def cropWarp(img,corners_list):  # corners_list : list of 4 points (height,width) or (y,x)
                                 # img should be same size as the img used to find corners_list from function findChessBoardCorners
                                 # yes the function later flips the coordinates but the input is (y,x)
@@ -116,12 +116,17 @@ def addPadding(img,size):
     newimg=cv2.copyMakeBorder(img, size, size, size, size, cv2.BORDER_CONSTANT, value=200)
     return newimg
 def crop(img,height_size,width_size):
-    h,w,c = img.shape
+    height_size = int(height_size)
+    width_size = int(width_size)
+    h,w = img.shape[0],img.shape[1]
     img = img[height_size:h-height_size,width_size:w-width_size]
     return img
 def vFlip(img):
     img = cv2.flip(img, 0)
     return img
+def hFlip(img):
+    return cv2.flip(img, 1)
+    
 def findSquaresCorners(blank,blank_board_threshold):
 
     blank = cv2.cvtColor(blank, cv2.COLOR_BGR2GRAY)
@@ -136,20 +141,19 @@ def findSquaresCorners(blank,blank_board_threshold):
     # thresh = cv2.filter2D(thresh,-1,kernel_v)
     ref, thresh = cv2.threshold(thresh, 175, 255, cv2.THRESH_BINARY)
     padded = addPadding(thresh, 50)
-    cv2.imshow('ss',padded)
-    cv2.waitKey()
-    cv2.destroyAllWindows()
     corners = cv2.goodFeaturesToTrack(padded, 81, 0.01, 30)
     corners_list = []
+    i = 0
     for c in corners:
         x, y = c.ravel()
         corners_list.append([int(y - 50), int(x - 50)])
-        cv2.circle(blank , (int(x - 50),int(y - 50)) , 2 ,(0,0,0) ,-1)
+        cv2.circle(blank , (int(y - 50), int(x - 50)) , 2 ,0 ,-1)
+        i += 1
+    print("corner detected : ",len(corners_list))
     cv2.imshow("cell_corners",blank)
-    cv2.waitKey(0)
+    cv2.waitKey()
     cv2.destroyAllWindows()
-        
-    print(len(corners_list))
+    
     return corners_list
 
 def sortPts(corners_list:list) ->list:   #list of the 81pts of the chess board of each cell 
@@ -184,12 +188,11 @@ def sortPts(corners_list:list) ->list:   #list of the 81pts of the chess board o
             sorted_pts.append(pt)
     return sorted_pts
 def makeSquares(img,sorted_pts:list):
+    img = vFlip(img)
     squares = []
-    
     for i in range(71):
         if i in [8,17,26,35,44,53,62]:
             continue
-        cv2.line
         square = img[sorted_pts[i][0]:sorted_pts[i+10][0],sorted_pts[i][1]:sorted_pts[i+10][1]]
         squares.append(square)
  
@@ -210,11 +213,10 @@ def makeSquaresDicts(squares:list):
     i =0
     for square in squares:
         if square.shape[1] != 0:
-            square = vFlip(square)
             squares_dict[chess.SQUARE_NAMES[i]] = square
             i += 1
     return squares_dict,squares_color_dict
-    
+
 
     
     
@@ -225,9 +227,11 @@ def makeSquaresStateDict(squares_dict,squares_color_dict,board,cell_threshold):
         # piece = getPiece(board,square_name)
         # piece_color = piece[0]
         # square_color = squares_color_dict[square_name]
-        square = crop(square, 7,7)
-        grey_square = cv2.cvtColor(square, cv2.COLOR_BGR2GRAY)
-        ret,thresh = cv2.threshold(grey_square, cell_threshold, 255, cv2.THRESH_BINARY)
+
+        # grey_square = cv2.cvtColor(square, cv2.COLOR_BGR2GRAY)
+        # crop_size = min(grey_square.shape[0],grey_square.shape[1])*0.4
+        # grey_square = crop(grey_square,crop_size ,crop_size)
+        # ret,thresh = cv2.threshold(grey_square, cell_threshold, 255, cv2.THRESH_BINARY)
 
         # cv2.imshow(square_name,thresh)
         # cv2.waitKey(0)
@@ -247,17 +251,40 @@ def makeSquaresStateDict(squares_dict,squares_color_dict,board,cell_threshold):
         # else:
         #     #TODO: use certain threshhold when the cell is empty
         #     pass
+        grey_square = cv2.cvtColor(square, cv2.COLOR_BGR2GRAY)
+        ret,thresh = cv2.threshold(grey_square, cell_threshold, 255, cv2.THRESH_BINARY)
+        bcount = 0
+        wcount = 0
+        for row in thresh:
+            for col in row:
+                if int(col) == 0:
+                    bcount += 1
+                else:
+                    wcount += 1
+        average = bcount/(bcount + wcount)
+        average = int(average*100) 
+        bcount = 0
+        wcount = 0 
+        for row in crop(thresh,10,10):
+            for col in row:
+                if int(col) == 0:
+                    bcount += 1
+                else:
+                    wcount += 1
+        average2= bcount/(bcount + wcount)
+        average2 = int(average2*100) 
 
-
-        corners = cv2.goodFeaturesToTrack(thresh,8, 0.001, 1)
-        if corners is None:
+        change = average2 - average
+        # corners = cv2.goodFeaturesToTrack(thresh,8, 0.001, 1)
+        print(square_name,average,average2)
+        if change < 30:
             square_state = 0
             squares_state_dict[square_name] = square_state #square is empty ie has no piece in it
-        else:
+        elif change >= 30:
             square_state = 1
             squares_state_dict[square_name] = square_state #square in not empty ie has a piece in it
     return squares_state_dict
-    
+
 def wholeProcess(blank_board,board):
     
     corners_list = findSquaresCorners(blank_board)
@@ -267,23 +294,23 @@ def wholeProcess(blank_board,board):
     
     
     return squares_dict,squares_color_dict
-def compare_pil(img1,img2):
+# # def compare_pil(img1,img2):
 
     
-    i1 = Image.fromarray(img1)
-    i2 = Image.fromarray(img2)
-    assert i1.mode == i2.mode, "Different kinds of images."
-    assert i1.size == i2.size, "Different sizes."
+#     i1 = Image.fromarray(img1)
+#     i2 = Image.fromarray(img2)
+#     assert i1.mode == i2.mode, "Different kinds of images."
+#     assert i1.size == i2.size, "Different sizes."
     
-    pairs = zip(i1.getdata(), i2.getdata())
-    if len(i1.getbands()) == 1:
-        # for gray-scale jpegs
-        dif = sum(abs(p1-p2) for p1,p2 in pairs)
-    else:
-        dif = sum(abs(c1-c2) for p1,p2 in pairs for c1,c2 in zip(p1,p2))
+#     pairs = zip(i1.getdata(), i2.getdata())
+#     if len(i1.getbands()) == 1:
+#         # for gray-scale jpegs
+#         dif = sum(abs(p1-p2) for p1,p2 in pairs)
+#     else:
+#         dif = sum(abs(c1-c2) for p1,p2 in pairs for c1,c2 in zip(p1,p2))
     
-    ncomponents = i1.size[0] * i1.size[1] * 3
-    return (dif / 255.0 * 100) / ncomponents
+#     ncomponents = i1.size[0] * i1.size[1] * 3
+#     return (dif / 255.0 * 100) / ncomponents
 
 def compareOldNew(b1,b2,corners_list,cell_threshold):  #1 is old board, 2 is new board 
     from_cord = '00'
@@ -318,33 +345,33 @@ def compareOldNew(b1,b2,corners_list,cell_threshold):  #1 is old board, 2 is new
     
     elif sum1-sum2 > 0: 
         print("eating")
-        #eating happend
-        for square in chess.SQUARE_NAMES:
-            diff = ssd2[square] - ssd1[square]
+        # #eating happend
+        # for square in chess.SQUARE_NAMES:
+        #     diff = ssd2[square] - ssd1[square]
 
-            if diff==-1:
-                from_cord = square
-                break
-            elif diff==0:
-                pass
+        #     if diff==-1:
+        #         from_cord = square
+        #         break
+        #     elif diff==0:
+        #         pass
 
-            else:
-                print('wtf happend')   
-        percent_max = 0
-        for square in chess.SQUARE_NAMES:
-            if square == from_cord:
-                continue
-            sq1 = cv2.cvtColor(sd1[square], cv2.COLOR_BGR2GRAY)
-            sq2 = cv2.cvtColor(sd2[square], cv2.COLOR_BGR2GRAY)
-            percentage = compare_pil(sq1,sq2)
-            #finds how much each cell changed from old to new.
-            #the cell with most change is the to_cord.
+        #     else:
+        #         print('wtf happend')   
+        # percent_max = 0
+        # for square in chess.SQUARE_NAMES:
+        #     if square == from_cord:
+        #         continue
+        #     sq1 = cv2.cvtColor(sd1[square], cv2.COLOR_BGR2GRAY)
+        #     sq2 = cv2.cvtColor(sd2[square], cv2.COLOR_BGR2GRAY)
+        #     percentage = compare_pil(sq1,sq2)
+        #     #finds how much each cell changed from old to new.
+        #     #the cell with most change is the to_cord.
 
-            print('percentage',percentage,percent_max)
-            if percentage > percent_max:
-                percent_max = percentage
-                to_cord = square
-        return from_cord + to_cord
+        #     print('percentage',percentage,percent_max)
+        #     if percentage > percent_max:
+        #         percent_max = percentage
+        #         to_cord = square
+        # return from_cord + to_cord
     return "wtf"        
 
 
